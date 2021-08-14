@@ -1,0 +1,106 @@
+Using the kernel
+
+***********
+Needless to say, this is all experimental, and I can offer no guarantees of any kind.
+Use at your own risk, and have fun !
+~ fenugrec
+***********
+
+TODO : write protocol description somewhere else ?
+
+The kernel implements a type of iso14230-compliant communications, without requiring the delicate "fast init" wake-up pattern.
+In other words, communications are established with a simple "StartCommunications" request.
+
+The protocol is relatively simple; the commands can even be sent manually from any serious terminal software (like Realterm).
+However longer data packets (as those sent during reflashing) are tedious to craft by hand and should be left to dedicated software, like nisprog !
+
+
+***** Super important notes before starting !!
+- plug your car to a battery charger while hacking / reflashing ! If the battery dies at the wrong moment, you'll have to unbrick the ECU !
+- make a backup of your ROM before you try changing anything ! Also make sure your ROM dump is not corrupt by verifying the checksum. nisrom can do this.
+- Proceed at your own risk, etc etc, the usual disclaimers.
+
+
+
+
+***** typical setup : nisprog
+nisprog offers an interactive, text-based interface. Most commands have a short help string if you add a question mark after the command name, like "set interface ?"
+See the nisprog docs for more details.
+
+- in the "set" submenu, make sure everything is OK. Example :
+	set
+	interface dumb
+	port \\.\COM30
+	dumbopts 0x48
+	l2protocol iso14230
+	initmode fast
+	testerid 0xfc
+	destaddr 0x10
+	addrtype phys
+	up
+- protip : add those "set" commands to your scantool.ini
+- car ignition ON (don't start the engine, and plug that battery charger !)
+	nc
+- it may be necessary to repeat that command a few times if it fails. I'm working on fixing this.
+- set device type
+    setdev 1
+***** Send + run the kernel
+    runkernel D:\dev\npkern\npkern.bin
+
+***** important note *****
+when trying the kernel on a new ECU, it's very important that both the kernel and the communications be stable.
+- I recommend dumping all or parts of the ROM at least once (try " dm asdf.bin 0 1048576 " for a 1MB ROM). This should be pretty bulletproof.
+- If comms eventually fail with a timeout / no response and nothing seems to work, maybe the WDT function of the kernel is inadequate and the ECU has automatically restarted.
+
+Of course, if any problems are encountered during those basic tests, reflashing should *not* be attempted !!
+
+***** reflashing
+WIP, these steps may change frequently.
+- make ABSOLUTELY sure the checksum of the new ROM file is ok before reflashing; more on this later. (TODO)
+
+
+Example :
+ - I have a 7058 and an awesome new ROM with a few changed bytes + checksum adjustment.
+ 
+
+-- A dry run is nice to make sure everything is fine, just select 'p' ("practice mode") when prompted.
+	flrom r7058_patched.bin
+  (note, the dry run will of course fail verification at the first changed byte, since it hasn't modified the Flash memory)
+
+ - Real reflash : check your battery charger !!! same command, but answer 'y' instead of 'p'
+	flrom r7058_patched.bin
+
+
+***** troubleshooting after reflash errors
+- copy / save the last output with all the status + error mesages.
+- usually the kernel is still running and accepting commands. To verify, try a short ROM dump, maybe "dm aaaa.bin 0 10000"
+
+- If not, the kernel may be out of sync
+(detailed explanation: if nisprog sends "01 3E 3F", but the kernel previously lost a byte,
+then it thinks the packet is "3E 3F", which is incomplete / invalid. If this happens, the kernel's command buffer needs to be purged
+manually (TODO : purge automatically / describe how?). I open realterm and send 0x00 bytes until I get a "0x7F something" response.
+
+- if comms were an issue (read timeouts, "bad duplex" errors, etc), try again, or lower the speed by changing the divisor
+  (TODO : implement command in nisprog, currently need to send the request manually)
+   "sr 0xBE 0x01 0x0A" will set the divisor to 0x0A (10), giving 56800bps. See iso_cmds.h , for SID_CONF_SETSPEED
+
+- if verification failed, try dumping the whole ROM and comparing to the desired file - maybe the writing step was successful anyway
+
+- re-try reflashing, maybe with the original / stock data from the backup ROM instead.
+
+
+
+***** reading from EEPROM
+ - you need to know where the "eeprom_read()" function is in the ROM. nisrom can do this automatically for many ROMs.
+ - give that location to the kernel : "sr 0xBE 0x02 <addr2> <addr1> <addr0>
+   example if the function is at 0x035250 in the ROM :
+	sr 0xbe 0x02 0x03 0x52 0x50
+ - use "dumpmem" but add "eep" at the end to specify the address is in EEPROM:
+	dumpmem eeprom_dump.bin 0 512 eep
+
+
+***** All done ? reset the ECU !
+	stopkernel
+	npdisc
+ 
+ 
